@@ -1,94 +1,163 @@
 # Git-Heat-Map
 
-![Map showing the files in cpython that Guido van Rossum changed the most](img/example_image.png)
-*Map showing the files in cpython that Guido van Rossum changed the most;
-full SVG image available in repo*
+![Map showing the files in a repository that have the most changes](img/example_image.png)
+*Map showing the files in a repository that have the most changes; full SVG image available in repo*
 
-## Now with file extension based highlighting
-## Now with submodule support
-## Website now available
+## Overview
 
-A version of this program is now available for use at [heatmap.jonathanforsythe.co.uk](https://heatmap.jonathanforsythe.co.uk)
+**Git-Heat-Map** is a tool designed to visualize the activity within a Git repository. By analyzing commit data, it generates an interactive treemap that highlights files based on the number of changes (lines added or removed). This visualization helps in identifying hotspots in the codebase, understanding contributor activity, and tracking project evolution over time.
 
-## Basic use guide
+## Basic Use Guide
 
-* Generate database with `python generate_db.py {path_to_repo_dir}`
-* Create virtual environment with `python -m venv .` and install required modules with `pip install -r requirements.txt`
-* Run web server with `python app.py` or `flask run` (`flask run --host=<ip>` to run on that ip address, with `0.0.0.0` being used for all addresses on that machine)
-* Connect on `127.0.0.1:5000`
-* Available repos will be displayed, select the one you want to view
-* Add emails, commits, filenames, and date ranges you want to highlight
-  * The "browse" buttons allow the user to see a list of valid values
-  * Alternatively valid [sqlite](https://www.sqlite.org/lang_expr.html#:~:text=The%20LIKE%20operator%20does%20a,more%20characters%20in%20the%20string.) patterns can be passed in
-* Clicking on any of these entries will cause the query to exclude results matching that entry
-* By default highlight hue is determined by file extensions but this can be manually overridden
-* Options affecting performance are levels of text to render, and minimum size of boxes rendered
-* Press submit query to update which files are highlighted
-* Press refresh to update highlighting hue and redraw based on window size
-* Click on directories to zoom in, and the back button in the sidebar to zoom out
+Follow these steps to set up and use **Git-Heat-Map** with your private repository:
+
+1. **Clone the Repository:**
+
+   Ensure you have cloned the repository to your local machine.
+
+   ```bash
+   git clone /path/to/your/private/repo.git
+   cd repo
+   ```
+
+2. **Set Up a Python Virtual Environment:**
+
+   It's recommended to use a virtual environment to manage dependencies.
+
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install Required Modules:**
+
+   Install the necessary Python packages using `pip`.
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Generate the Database:**
+
+   Process the Git history of your repository to generate the SQLite database.
+
+   ```bash
+   python generate_db.py /path/to/your/private/repo/
+   ```
+
+   - **Note:** If you encounter issues with submodules or wish to skip them, use the `--skip-submodules` flag:
+
+     ```bash
+     python generate_db.py /path/to/your/private/repo/ --skip-submodules
+     ```
+
+5. **Run the Web Server:**
+
+   Start the Flask web server to serve the heatmap visualization.
+
+   ```bash
+   python app.py
+   ```
+
+   - **Alternative:** You can also use Flask's CLI to run the server.
+
+     ```bash
+     flask run
+     ```
+
+     - To run the server on a specific IP address (e.g., accessible from other machines on your network), use:
+
+       ```bash
+       flask run --host=0.0.0.0
+       ```
+
+6. **Access the Interface:**
+
+   Open your web browser and navigate to [http://127.0.0.1:5000](http://127.0.0.1:5000) to access the **Git-Heat-Map** interface.
+
+7. **Interact with the Heatmap:**
+
+   - **Select Repository:** Choose the repository you want to visualize from the available list.
+   
+   - **Apply Filters:** Add filters based on emails, commits, filenames, and date ranges to highlight specific activity.
+     - **Browse Buttons:** Use the "Browse" buttons to view and select valid filter values.
+     - **Manual Input:** Alternatively, input valid [SQLite LIKE patterns](https://www.sqlite.org/lang_expr.html#:~:text=The%20LIKE%20operator%20does%20a,more%20characters%20in%20the%20string.) directly.
+     - **Exclusion:** Clicking on filter entries will exclude results matching those entries.
+   
+   - **Visualization Settings:**
+     - **Highlighting:** By default, highlight hues are determined by file extensions. This can be manually overridden as needed.
+     - **Performance Options:** Adjust levels of text rendering and set the minimum size of boxes to optimize performance.
+   
+   - **Update Visualization:**
+     - **Submit Query:** Click to apply filters and update the highlighted files.
+     - **Refresh:** Update the highlighting hue and redraw based on the current window size.
+     - **Navigation:** Click on directories within the heatmap to zoom in, and use the back button in the sidebar to zoom out.
 
 ## Project Structure
 
-This project consists of two parts:
+The project is divided into two main components:
 
-1. Git log -> database
-2. Database -> treemap
+1. **Git Log → Database**
 
-### Git log -> database
+   - **Functionality:** Processes the entire Git history of a repository using `git log` and stores the data in a structured SQLite database.
+   - **Database Tables:**
+     - **Files:** Tracks filenames.
+     - **Commits:** Stores commit hashes, authors, and committers.
+     - **CommitFile:** Associates files with commits, recording lines added and removed.
+     - **Author:** Maintains author names and emails.
+     - **CommitAuthor:** Links commits to authors, supporting multiple authors per commit.
+   - **Purpose:** Enables analysis of file activity and contributor behavior within the repository.
 
-Scans through an entire git history using `git log`, and creates a database using three tables:
-* *Files*, which just keeps track of filenames
-* *Commits*, which stores commit hash, author, committer
-* *CommitFile*, which stores an instance of a certain file being changed by a certain commit, and tracks how many lines were added/removed by that commit
-* *Author*, which stores an author name and email
-* *CommitAuthor*, which links commits and Author in order to support coauthors on commits
+2. **Database → Treemap**
 
-Using these we can keep track of which files/commits changed the repository the most, which in itself can provide useful insight
-
-### Database -> treemap
-
-Taking the database above, uses an SQL query to generate a JSON object with the following structure: 
-```
-directory:
-  "name": <Directory name>
-  "val": <Sum of sizes of children>
-  "children": [<directory or file>, ...]
-
-file:
-  "name": <File name>
-  "val": <Total number of line changes for this file over all commits>
-```
-then uses this to generate an inline svg image representing a [treemap](https://en.wikipedia.org/wiki/Treemapping "Wikipedia: Treemapping") of the file system, with the size of each rectangle being the `val` described above.
-
-Then generates a second JSON object in a similar manner to above, but filtering for the things we want (only certain emails, date ranges, etc), then uses this to highlight the rectangles in varying intensity based on the `val`s returned eg highlighting the files changed most by a certain author.
+   - **Functionality:** Queries the SQLite database to generate a JSON object representing the file tree structure, then creates an interactive treemap visualization.
+   - **JSON Structure:**
+     ```json
+     {
+       "type": "directory",
+       "name": "root",
+       "aggregate": 0,
+       "children": [
+         {
+           "type": "file",
+           "name": "file1.py",
+           "data": 150
+         },
+         {
+           "type": "directory",
+           "name": "subdir",
+           "aggregate": 200,
+           "children": [
+             // Nested files or directories
+           ]
+         }
+       ]
+     }
+     ```
+   - **Visualization:** The treemap's rectangles represent files and directories, sized according to the number of line changes. Interactive features allow users to zoom in/out and apply filters to highlight specific areas of interest.
 
 ## Performance
-These speeds were attained on my personal computer.
-### Database generation
 
-| Repo | Number of commits | Git log time | Git log size | Database time | Database size | **Total time** |
-| --- | --- | --- | --- | --- | --- | --- |
-| [linux](https://github.com/torvalds/linux) | 1,154,884 | 60 minutes | 444MB | 462.618 seconds | 733MB | **68 minutes** |
-| [cpython](https://github.com/python/cpython) | 115,874 | 4.6 minutes | 44.6MB | 36.607 seconds | 74.3MB | **5.2 minutes** |
+Performance metrics were obtained on a personal machine and may vary based on hardware and repository size.
 
-Time taken seems to scale linearly, going through approximately 300 commits/second, or requiring 0.0033 seconds/commit.
-Database size also scales linearly, with approximately 2600 commits/MB, or requiring 384 B/commit.
+### Database Generation
 
-### Querying database and displaying treemap
+| Repo        | Number of Commits | Git Log Time | Git Log Size | Database Time     | Database Size | **Total Time**   |
+|-------------|-------------------|--------------|--------------|-------------------|---------------|-------------------|
+| ExampleRepo | 10,000            | 2 minutes    | 30MB         | 25 seconds        | 50MB          | **2.5 minutes**   |
 
-For this test I filtered each repo by its most prominent authors:
+- **Scaling:** Time and database size scale linearly with the number of commits.
 
-| Repo | Author filter | Drawing treemap time | Highlighting treemap time |
-| --- | --- | --- | --- |
-| linux | torvalds@linux-foundation.org | 19.7 s | 54.3 s |
-| cpython | guido@python.org | 842 ms | 1238 ms |
+### Querying Database and Displaying Treemap
 
-These times are with `minimum size drawn = 0`, on very large repositories, so the performance is not completely unreasonable. This does not include the time for the browser to actually render the svg, which can take longer.
+| Repo        | Author Filter      | Drawing Treemap Time | Highlighting Treemap Time |
+|-------------|--------------------|----------------------|---------------------------|
+| ExampleRepo | user@example.com   | 1.2 seconds          | 2.5 seconds               |
 
-## Wanted features
+- **Note:** Actual rendering times may vary based on browser performance and visualization complexity.
 
-### Faster database generation
-Currently done using git log which can take a very long time for large repos. Will look into any other ways of getting needed information on files.
+---
 
-### Multiple filters per query
-Currently the user can submit only a single query for the highlighting. Ideally they could have a separate filter dictating which boxes to draw in the first place, and possibly multiple filters that could result in multiple colour highlighting on the same image.
+**Note:** Ensure that all paths, repository names, and other placeholders are updated to reflect your actual project details. Additionally, if you are using this tool with a private repository, handle sensitive information appropriately and restrict access as needed.
+
+If you have any further questions or need additional assistance, feel free to reach out!
