@@ -1,6 +1,10 @@
 import sqlite3
+import logging
 
 from . import file_tree
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_filtered_query(filter):
     base_query = """
@@ -24,38 +28,38 @@ def get_filtered_query(filter):
     valid_field = lambda key: key in filter and isinstance(filter[key], tuple) and len(filter[key]) > 0
 
     if valid_field("email_include"):
-        wheres_inner.append("(" + " OR ".join([f"commitAuthor.authorEmail LIKE ?" for email in filter["email_include"]]) + ")")
+        wheres_inner.append("(" + " OR ".join([f"commitAuthor.authorEmail LIKE ?" for _ in filter["email_include"]]) + ")")
         params.extend(filter["email_include"])
 
     if valid_field("email_exclude"):
-        wheres_inner.append("(" + " AND ".join([f"commitAuthor.authorEmail NOT LIKE ?" for email in filter["email_exclude"]]) + ")")
+        wheres_inner.append("(" + " AND ".join([f"commitAuthor.authorEmail NOT LIKE ?" for _ in filter["email_exclude"]]) + ")")
         params.extend(filter["email_exclude"])
 
     if valid_field("commit_include"):
-        wheres.append("(" + " OR ".join([f"commitFile.hash LIKE ?" for hash in filter["commit_include"]]) + ")")
+        wheres.append("(" + " OR ".join([f"commitFile.hash LIKE ?" for _ in filter["commit_include"]]) + ")")
         params.extend(filter["commit_include"])
 
     if valid_field("commit_exclude"):
-        wheres.append("(" + " AND ".join([f"commitFile.hash NOT LIKE ?" for hash in filter["commit_exclude"]]) + ")")
+        wheres.append("(" + " AND ".join([f"commitFile.hash NOT LIKE ?" for _ in filter["commit_exclude"]]) + ")")
         params.extend(filter["commit_exclude"])
 
     if valid_field("filename_include"):
-        wheres.append("(" + " OR ".join([f"files.filePath LIKE ?" for filename in filter["filename_include"]]) + ")")
+        wheres.append("(" + " OR ".join([f"files.filePath LIKE ?" for _ in filter["filename_include"]]) + ")")
         params.extend(filter["filename_include"])
 
     if valid_field("filename_exclude"):
-        wheres.append("(" + " AND ".join([f"files.filePath NOT LIKE ?" for filename in filter["filename_exclude"]]) + ")")
+        wheres.append("(" + " AND ".join([f"files.filePath NOT LIKE ?" for _ in filter["filename_exclude"]]) + ")")
         params.extend(filter["filename_exclude"])
 
     if valid_field("datetime_include"):
         joins.add("JOIN commits on commitFile.hash = commits.hash")
-        wheres.append("(" + " OR ".join([f"commits.authorDate BETWEEN ? AND ?" for date_range in filter["datetime_include"]]) + ")")
+        wheres.append("(" + " OR ".join([f"commits.authorDate BETWEEN ? AND ?" for _ in filter["datetime_include"]]) + ")")
         date_expand = [d for r in filter["datetime_include"] for d in r.split(" ")]
         params.extend(date_expand)
 
     if valid_field("datetime_exclude"):
         joins.add("JOIN commits on commitFile.hash = commits.hash")
-        wheres.append("(" + " AND ".join([f"commits.authorDate NOT BETWEEN ? AND ?" for date_range in filter["datetime_exclude"]]) + ")")
+        wheres.append("(" + " AND ".join([f"commits.authorDate NOT BETWEEN ? AND ?" for _ in filter["datetime_exclude"]]) + ")")
         date_expand = [d for r in filter["datetime_exclude"] for d in r.split(" ")]
         params.extend(date_expand)
 
@@ -91,8 +95,20 @@ def get_json_from_db(database_name, query=get_files_SQL, params=tuple()):
         for component in path[:-1]:
             if component not in cur_dir.children:
                 cur_dir.add_child(file_tree.Directory(component))
+            else:
+                # Ensure that the existing child is a Directory
+                existing_child = cur_dir.children[component]
+                if not isinstance(existing_child, file_tree.Directory):
+                    logging.error(f"Path conflict: '{component}' is not a Directory.")
+                    # Optionally, handle the conflict by replacing the File with a Directory
+                    # or by skipping this path
+                    continue
             cur_dir = cur_dir.children[component]
-        cur_dir.add_child(file_tree.File(path[-1], file_dict[key]))
+        # Add the File to the current Directory
+        try:
+            cur_dir.add_child(file_tree.File(path[-1], file_dict[key]))
+        except AttributeError as e:
+            logging.error(f"Failed to add File '{path[-1]}' to Directory '{cur_dir.name}': {e}")
 
     rootDir.update_val()
     return rootDir.get_json(0)
