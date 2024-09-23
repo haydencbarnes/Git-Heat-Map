@@ -2,84 +2,203 @@ import sys
 import os
 import subprocess
 import pathlib
+import logging
 
 from db_generation import git_database, git_log_format
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 def generate_db(log_output, database_path):
-    con = git_database.db_connection(database_path)
-    cur = con.cursor()
+    """
+    Generates the SQLite database by processing Git log output.
 
-    git_database.create_tables(cur)
+    Args:
+        log_output (file-like object): The stdout from the Git log subprocess.
+        database_path (str): Path where the SQLite database will be created.
 
-    lines = []
+    Returns:
+        str: The hash of the last processed commit.
+    """
+    try:
+        con = git_database.db_connection(database_path)
+        cur = con.cursor()
 
-    while line := git_database.get_next_line(log_output):
-        if chr(line[0]).encode() == git_database.COMMIT_START_SYMBOL.encode():
+        git_database.create_tables(cur)
+
+        lines = []
+
+        while True:
+            line = git_database.get_next_line(log_output)
+            if not line:
+                break
+            if chr(line[0]) == git_database.COMMIT_START_SYMBOL:
+                last_commit = git_database.handle_commit(cur, lines)
+                lines = [line]
+            else:
+                lines.append(line)
+        # Handle the last commit if any
+        if lines:
             last_commit = git_database.handle_commit(cur, lines)
-            lines = [line]
-        else:
-            lines.append(line)
-    last_commit = git_database.handle_commit(cur, lines)
 
-    git_database.create_indices(cur)
+        git_database.create_indices(cur)
 
-    con.commit()
-    con.close()
+        con.commit()
+        con.close()
 
-    return last_commit
+        return last_commit
+    except Exception as e:
+        logging.error(f"An error occurred during database generation: {e}")
+        sys.exit(1)
+
 
 def get_submodules(source_path):
-    l = subprocess.Popen(f"git -C {source_path}" + r" config -z --file .gitmodules --get-regexp submodule\..*\.path", stdout=subprocess.PIPE).stdout.read().split(b"\0")
-    return [pathlib.Path(os.fsdecode(i.splitlines()[1])) for i in l if len(i)]
+    """
+    Retrieves submodule paths from the given Git repository.
+
+    Args:
+        source_path (Path): Path to the Git repository.
+
+    Returns:
+        list of Path: List of submodule paths.
+    """
+    try:
+        git_command = [
+            "git",
+            "-C",
+            str(source_path),
+            "config",
+            "-z",
+            "--file",
+            ".gitmodules",
+            "--get-regexp",
+            r"submodule\..*\.path"
+        ]
+        logging.debug(f"Running Git command: {' '.join(git_command)}")
+        process = subprocess.Popen(git_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            stderr_decoded = stderr.decode().strip()
+            if "fatal" in stderr_decoded.lower():
+                logging.info(f"No submodules found in {source_path}.")
+                return []
+            else:
+                logging.error(f"Git command failed with return code {process.returncode}: {stderr_decoded}")
+                return []
+
+        # Split the output by NULL byte and decode
+        lines = stdout.split(b"\0")
+        submodule_paths = []
+
+        if len(lines) % 2 != 0:
+            logging.warning(f"Unexpected number of lines in submodule output: {len(lines)}")
+
+        for i in range(0, len(lines)-1, 2):
+            key = lines[i].decode().strip()
+            path = lines[i+1].decode().strip()
+            if path:  # Ensure path is not empty
+                submodule_paths.append(path)
+
+        logging.debug(f"Found submodules: {submodule_paths}")
+        return [pathlib.Path(path) for path in submodule_paths]
+    except FileNotFoundError:
+        logging.error("Git is not installed or not found in the system's PATH.")
+        sys.exit(1)
+    except Exception as e:
+        logging.error(f"An error occurred while retrieving submodules: {e}")
+        return []
+
 
 def generate_recursive(source_path, source_path_parent, dest_dir_parent):
-    print(source_path)
-    repo_name = source_path.stem
+    """
+    Recursively generates databases for the repository and its submodules.
 
-    dest_dir = dest_dir_parent / source_path.relative_to(source_path_parent)
+    Args:
+        source_path (Path): Path to the current repository.
+        source_path_parent (Path): Path to the parent repository.
+        dest_dir_parent (Path): Directory where databases are stored.
+    """
+    try:
+        logging.info(f"Processing repository at {source_path}")
+        repo_name = source_path.stem
 
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    database_path = (dest_dir / repo_name).with_suffix(".db")
+        # Determine the destination directory
+        dest_dir = dest_dir_parent / source_path.relative_to(source_path_parent)
 
-    last_commit_file = dest_dir / "lastcommit.txt"
-    if last_commit_file.is_file():
-        with open(last_commit_file, "r") as f:
-            last_commit = f.read()
-    else:
-        last_commit = None
+        # Create the destination directory if it doesn't exist
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        database_path = (dest_dir / repo_name).with_suffix(".db")
 
-    log_process = git_log_format.get_log_process(source_path, last_commit)
+        # Determine the path for the last commit file
+        last_commit_file = dest_dir / "lastcommit.txt"
+        if last_commit_file.is_file():
+            with open(last_commit_file, "r") as f:
+                last_commit = f.read().strip()
+            logging.debug(f"Last commit for {repo_name}: {last_commit}")
+        else:
+            last_commit = None
+            logging.debug(f"No previous commit found for {repo_name}.")
 
-    log_output = log_process.stdout
+        # Get the Git log subprocess
+        log_process = git_log_format.get_log_process(source_path, last_commit)
 
-    last_commit = generate_db(log_output, database_path)
+        log_output = log_process.stdout
 
-    if last_commit != None:
-        with open(last_commit_file, "w") as f:
-            f.write(last_commit)
+        # Generate the database
+        last_commit = generate_db(log_output, database_path)
 
-    print(f"Database generated at \"{database_path.absolute()}\"")
+        # Update the last commit file
+        if last_commit:
+            with open(last_commit_file, "w") as f:
+                f.write(last_commit)
+            logging.debug(f"Updated last commit for {repo_name}: {last_commit}")
 
-    submodule_paths = get_submodules(source_path)
-    for p in submodule_paths:
-        generate_recursive(source_path / p, source_path, dest_dir)
+        logging.info(f"Database generated at \"{database_path.absolute()}\"")
 
-    submodules_file = dest_dir / ".gitmodules"
-    with open(submodules_file, "w") as f:
-        f.writelines("\n".join(p.as_posix() for p in submodule_paths))
+        # Retrieve submodule paths
+        submodule_paths = get_submodules(source_path)
+        for p in submodule_paths:
+            full_submodule_path = source_path / p
+            if not full_submodule_path.is_dir():
+                logging.error(f"Submodule path does not exist: {full_submodule_path}")
+                continue
+            generate_recursive(full_submodule_path, source_path, dest_dir)
+
+        # Write the .gitmodules file in the destination directory
+        submodules_file = dest_dir / ".gitmodules"
+        if submodule_paths:
+            with open(submodules_file, "w") as f:
+                f.writelines("\n".join(p.as_posix() for p in submodule_paths))
+            logging.debug(f"Wrote .gitmodules for {repo_name} with submodules: {submodule_paths}")
+        else:
+            logging.debug(f"No submodules to write for {repo_name}.")
+
+    except Exception as e:
+        logging.error(f"An error occurred while processing {source_path}: {e}")
+
 
 def main():
-    argc = len(sys.argv)
-    if argc < 2:
-        print("No repo supplied")
-        return
+    """
+    Main function to initiate the database generation process.
+    """
+    if len(sys.argv) < 2:
+        print("Usage: python generate_db.py <path_to_repo_dir>")
+        sys.exit(1)
 
-    repos_dir = pathlib.Path(__file__).parent / "repos"
+    repo_dir = pathlib.Path(sys.argv[1]).resolve()
+
+    if not repo_dir.is_dir():
+        logging.error(f"The provided path '{repo_dir}' is not a directory.")
+        sys.exit(1)
+
+    # Define the directory where databases will be stored
+    repos_dir = repo_dir / "repos"
     repos_dir.mkdir(exist_ok=True)
 
-    source_path = pathlib.Path(sys.argv[1])
+    generate_recursive(repo_dir, repo_dir.parent, repos_dir)
 
-    generate_recursive(source_path, source_path.parent, repos_dir)
 
 if __name__ == "__main__":
     main()
