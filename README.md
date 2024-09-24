@@ -25,7 +25,7 @@ Follow these steps to set up and use **Git-Heat-Map** with your private reposito
    It's recommended to use a virtual environment to manage dependencies.
 
    ```bash
-   python -m venv venv
+   python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
@@ -34,7 +34,7 @@ Follow these steps to set up and use **Git-Heat-Map** with your private reposito
    Install the necessary Python packages using `pip`.
 
    ```bash
-   pip install -r requirements.txt
+   pip3 install -r requirements.txt
    ```
 
 4. **Generate the Database:**
@@ -42,13 +42,13 @@ Follow these steps to set up and use **Git-Heat-Map** with your private reposito
    Process the Git history of your repository to generate the SQLite database.
 
    ```bash
-   python generate_db.py /path/to/your/private/repo/
+   python3 generate_db.py /path/to/your/private/repo/
    ```
 
    - **Note:** If you encounter issues with submodules or wish to skip them, use the `--skip-submodules` flag:
 
      ```bash
-     python generate_db.py /path/to/your/private/repo/ --skip-submodules
+     python3 generate_db.py /path/to/your/private/repo/ --skip-submodules
      ```
 
 5. **Run the Web Server:**
@@ -56,7 +56,7 @@ Follow these steps to set up and use **Git-Heat-Map** with your private reposito
    Start the Flask web server to serve the heatmap visualization.
 
    ```bash
-   python app.py
+   python3 app.py
    ```
 
    - **Alternative:** You can also use Flask's CLI to run the server.
