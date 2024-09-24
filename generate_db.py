@@ -69,7 +69,6 @@ def get_submodules(source_path):
             "-C",
             str(source_path),
             "config",
-            "-z",
             "--file",
             ".gitmodules",
             "--get-regexp",
@@ -81,28 +80,20 @@ def get_submodules(source_path):
 
         if process.returncode != 0:
             stderr_decoded = stderr.decode().strip()
-            if "fatal" in stderr_decoded.lower():
-                logging.info(f"No submodules found in {source_path}.")
+            if "No such file or directory" in stderr_decoded:
+                logging.info(f"No .gitmodules file found in {source_path}.")
                 return []
             else:
                 logging.error(f"Git command failed with return code {process.returncode}: {stderr_decoded}")
                 return []
 
-        # Split the output by NULL byte and decode
-        lines = stdout.split(b"\0")
         submodule_paths = []
-
-        if len(lines) % 2 != 0:
-            logging.warning(f"Unexpected number of lines in submodule output: {len(lines)}")
-
-        for i in range(0, len(lines)-1, 2):
-            key = lines[i].decode().strip()
-            path = lines[i+1].decode().strip()
-            if path:  # Ensure path is not empty
-                submodule_paths.append(path)
+        for line in stdout.decode().splitlines():
+            key, path = line.split()
+            submodule_paths.append(path.strip())
 
         logging.debug(f"Found submodules: {submodule_paths}")
-        return [pathlib.Path(path) for path in submodule_paths]
+        return [source_path / pathlib.Path(path) for path in submodule_paths]
     except FileNotFoundError:
         logging.error("Git is not installed or not found in the system's PATH.")
         sys.exit(1)
@@ -159,18 +150,18 @@ def generate_recursive(source_path, source_path_parent, dest_dir_parent):
 
         # Retrieve submodule paths
         submodule_paths = get_submodules(source_path)
-        for p in submodule_paths:
-            full_submodule_path = source_path / p
-            if not full_submodule_path.is_dir():
-                logging.error(f"Submodule path does not exist: {full_submodule_path}")
+        for submodule_path in submodule_paths:
+            if not submodule_path.is_dir():
+                logging.warning(f"Submodule path does not exist: {submodule_path}")
                 continue
-            generate_recursive(full_submodule_path, source_path, dest_dir)
+            generate_recursive(submodule_path, source_path, dest_dir)
 
         # Write the .gitmodules file in the destination directory
         submodules_file = dest_dir / ".gitmodules"
         if submodule_paths:
             with open(submodules_file, "w") as f:
-                f.writelines("\n".join(p.as_posix() for p in submodule_paths))
+                for path in submodule_paths:
+                    f.write(f"{path.relative_to(source_path)}\n")
             logging.debug(f"Wrote .gitmodules for {repo_name} with submodules: {submodule_paths}")
         else:
             logging.debug(f"No submodules to write for {repo_name}.")
@@ -194,7 +185,9 @@ def main():
         sys.exit(1)
 
     # Define the directory where databases will be stored
-    repos_dir = repo_dir / "repos"
+    # Use the current working directory instead of repo_dir
+    current_dir = pathlib.Path.cwd()
+    repos_dir = current_dir / "repos"
     repos_dir.mkdir(exist_ok=True)
 
     generate_recursive(repo_dir, repo_dir.parent, repos_dir)
