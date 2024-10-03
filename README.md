@@ -45,12 +45,6 @@ Follow these steps to set up and use **Git-Heat-Map** with your private reposito
    python3 generate_db.py /path/to/your/private/repo/
    ```
 
-   - **Note:** If you encounter issues with submodules or wish to skip them, use the `--skip-submodules` flag:
-
-     ```bash
-     python3 generate_db.py /path/to/your/private/repo/ --skip-submodules
-     ```
-
 5. **Run the Web Server:**
 
    Start the Flask web server to serve the heatmap visualization.
